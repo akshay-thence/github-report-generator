@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:html' as html;
 
 import 'package:flutter/material.dart';
-import 'package:github_export/foo.dart';
+import 'package:github_export/function.dart';
 
 enum ApiStatus { initial, loading, success, error }
 

@@ -26,7 +26,7 @@ Future<List<Map<String, dynamic>>> getIssues({
 }) async {
   final res = await http.get(
     Uri.parse(
-        'https://api.github.com/repos/$repoUrl/issues?labels=bug&state=$state&per_page=$perPage&page=$page'),
+        'https://api.github.com/repos/$repoUrl/issues?state=$state&per_page=$perPage&page=$page'),
     headers: {
       "Accept": "application/vnd.github+jso",
       'X-GitHub-Api-Version': '2022-11-28',
@@ -90,12 +90,12 @@ String createCsv(List<Map<String, dynamic>> data) {
     'TICKET NUMBER',
     'CREATED BY',
     'CREATED ON',
-    "TILE",
+    "TITLE",
     "STATUS",
     "ASSIGNEE",
     "ENVIRONMENT",
-    "BUILD"
-        "PRIORITY",
+    "BUILD",
+    "PRIORITY",
     "PLATFORM",
     "MODULE",
     "TICKET",
