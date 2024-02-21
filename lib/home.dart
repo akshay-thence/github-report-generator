@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'dart:html' as html;
 
+import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
 import 'package:github_export/function.dart';
+import 'package:github_export/models/issue_model.dart';
+import 'package:github_export/models/report_summary_model.dart';
 
 enum ApiStatus { initial, loading, success, error }
 
@@ -16,6 +19,10 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   ApiStatus apiStatus = ApiStatus.initial;
   TextEditingController controller = TextEditingController();
+  TextEditingController tokenController = TextEditingController();
+
+  List<ReportSummary> reportSummary = [];
+  List<FormattedIssueModel>? formattedData;
 
   Future<void> fetchRepository() async {
     if (apiStatus == ApiStatus.loading) return;
@@ -23,12 +30,14 @@ class _HomePageState extends State<HomePage> {
     setState(() {});
     try {
       final repo = extractOwnerAndRepo(controller.text);
-      final data = await fetchAllBugs(repo);
-      final csv = createCsv(data);
-      apiStatus = ApiStatus.success;
+      final data = await fetchAllBugs(repo, tokenController.text.trim());
 
+      formattedData = formatData(data);
+      reportSummary = generateSummary(formattedData ?? []);
+
+      apiStatus = ApiStatus.success;
       setState(() {});
-      download(csv);
+      // download(csv);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -38,6 +47,34 @@ class _HomePageState extends State<HomePage> {
       apiStatus = ApiStatus.error;
       setState(() {});
     }
+  }
+
+  void exportCsv() {
+    List<List<dynamic>> csvData = [
+      [
+        'Ticket number',
+        'Created by',
+        'Created on',
+        'Title',
+        'Status',
+        'Assignee',
+        'Environment',
+        'Build',
+        'Priority',
+        'Platform',
+        'Module',
+        'Ticket',
+        'Issue',
+        'Bug status',
+        'Blocker',
+        'Dev pc',
+        'Invalid bug',
+        'Duplicate bug',
+      ],
+      ...formattedData?.map((e) => e.toArray()).toList() ?? []
+    ];
+    final csvString = const ListToCsvConverter().convert(csvData);
+    download(csvString);
   }
 
   void download(String csv) {
@@ -77,7 +114,19 @@ class _HomePageState extends State<HomePage> {
                   const SizedBox(width: 24),
                 ],
               ),
-              const SizedBox(height: 40),
+              const SizedBox(height: 16),
+              SizedBox(
+                height: 60,
+                child: TextField(
+                  controller: tokenController,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    hintText: 'Github token',
+                  ),
+                ),
+              ),
               SizedBox(
                 height: 60,
                 child: Row(
@@ -107,14 +156,65 @@ class _HomePageState extends State<HomePage> {
                                   ),
                                 ),
                               ),
-                              icon: const Icon(Icons.download, size: 18),
-                              label: const Text('Download report'),
+                              icon: const Icon(Icons.search, size: 18),
+                              label: const Text('View Report'),
                               onPressed: () => fetchRepository(),
                             ),
                     ),
                   ],
                 ),
               ),
+              const SizedBox(height: 20),
+              if (apiStatus == ApiStatus.success)
+                ElevatedButton.icon(
+                  style: ButtonStyle(
+                    shape: MaterialStateProperty.all<RoundedRectangleBorder>(
+                      RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.download, size: 18),
+                  label: const Text('Download CSV'),
+                  onPressed: () => exportCsv(),
+                ),
+              if (apiStatus == ApiStatus.success && reportSummary.isNotEmpty)
+                Flexible(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.only(top: 20),
+                    shrinkWrap: true,
+                    itemCount: reportSummary.length,
+                    separatorBuilder: (_, __) => const Divider(),
+                    itemBuilder: (BuildContext context, int i) {
+                      return SelectionArea(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(),
+                            Text(
+                              'Sprint: ${reportSummary[i].sprint} Version: ${reportSummary[i].version}',
+                            ),
+                            Text(
+                              'Total bugs count: ${reportSummary[i].bugsCount}',
+                            ),
+                            Text(
+                              'Resolved bugs count: ${reportSummary[i].resolvedBugsCount}',
+                            ),
+                            Text(
+                              'Pending bugs count: ${reportSummary[i].pendingBugsCount}',
+                            ),
+                            Text(
+                              'Invalid bugs count: ${reportSummary[i].invalidBugsCount}',
+                            ),
+                            Text(
+                              'Duplicate bugs count:: ${reportSummary[i].duplicateBugsCount}',
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
             ],
           ),
         ),

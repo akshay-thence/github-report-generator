@@ -1,6 +1,10 @@
+// ignore_for_file: public_member_api_docs, sort_constructors_first
+// ignore_for_file: avoid_print
+
 import 'dart:convert';
 
-import 'package:csv/csv.dart';
+import 'package:github_export/models/issue_model.dart';
+import 'package:github_export/models/report_summary_model.dart';
 import 'package:http/http.dart' as http;
 
 String extractOwnerAndRepo(String githubUrl) {
@@ -20,6 +24,7 @@ String extractOwnerAndRepo(String githubUrl) {
 
 Future<List<Map<String, dynamic>>> getIssues({
   required String repoUrl,
+  required String token,
   required String state,
   required int page,
   int perPage = 100,
@@ -30,7 +35,7 @@ Future<List<Map<String, dynamic>>> getIssues({
     headers: {
       "Accept": "application/vnd.github+jso",
       'X-GitHub-Api-Version': '2022-11-28',
-      "Authorization": "Bearer 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"
+      "Authorization": "Bearer $token"
     },
   );
   if (res.statusCode == 200) {
@@ -44,7 +49,10 @@ Future<List<Map<String, dynamic>>> getIssues({
   return [];
 }
 
-Future<List<Map<String, dynamic>>> fetchAllBugs(String repoUrl) async {
+Future<List<Map<String, dynamic>>> fetchAllBugs(
+  String repoUrl,
+  String token,
+) async {
   try {
     List<Map<String, dynamic>> data = [];
     bool hasNextOpenIssue = true;
@@ -56,6 +64,7 @@ Future<List<Map<String, dynamic>>> fetchAllBugs(String repoUrl) async {
       print('Fetching open issues page $openPage');
       final issues = await getIssues(
         repoUrl: repoUrl,
+        token: token,
         page: openPage,
         state: 'open',
       );
@@ -67,6 +76,7 @@ Future<List<Map<String, dynamic>>> fetchAllBugs(String repoUrl) async {
     do {
       final issues = await getIssues(
         repoUrl: repoUrl,
+        token: token,
         page: closedPage,
         state: 'closed',
       );
@@ -82,30 +92,10 @@ Future<List<Map<String, dynamic>>> fetchAllBugs(String repoUrl) async {
   }
 }
 
-String createCsv(List<Map<String, dynamic>> data) {
+List<FormattedIssueModel> formatData(List<Map<String, dynamic>> data) {
   data.removeWhere((element) => element.containsKey('pull_request'));
 
-  final List<List<dynamic>> output = [];
-  final header = [
-    'TICKET NUMBER',
-    'CREATED BY',
-    'CREATED ON',
-    "TITLE",
-    "STATUS",
-    "ASSIGNEE",
-    "ENVIRONMENT",
-    "BUILD",
-    "PRIORITY",
-    "PLATFORM",
-    "MODULE",
-    "TICKET",
-    "ISSUE",
-    "BUG STATUS",
-    "BLOCKER",
-    "DEV/PC",
-  ];
-
-  output.add(header);
+  final List<FormattedIssueModel> output = [];
 
   for (final i in data) {
     final number = i['number'];
@@ -128,18 +118,24 @@ String createCsv(List<Map<String, dynamic>> data) {
     final priority = labels.firstWhere(
         (e) => e.toLowerCase().contains('priority:'),
         orElse: () => '');
+
     final platform = labels.firstWhere(
         (e) => e.toLowerCase().contains('platform:'),
         orElse: () => '');
+
     final mod = labels.firstWhere((e) => e.toLowerCase().contains('mod:'),
         orElse: () => '');
+
     final ticket = labels.firstWhere((e) => e.toLowerCase().contains('ticket:'),
         orElse: () => '');
+
     final issue = labels.firstWhere((e) => e.toLowerCase().contains('issue:'),
         orElse: () => '');
+
     final bugStatus = labels.firstWhere(
         (e) => e.toLowerCase().contains('status:'),
         orElse: () => '');
+
     final blocker = labels.firstWhere(
         (e) => e.toLowerCase().contains('blocker:'),
         orElse: () => 'No');
@@ -147,33 +143,91 @@ String createCsv(List<Map<String, dynamic>> data) {
     final devPc = labels.firstWhere((e) => e.toLowerCase().contains('dev/pc:'),
         orElse: () => '');
 
+    final invalidBug = labels.firstWhere(
+        (e) => e.toLowerCase().contains('blocker'),
+        orElse: () => '');
+
+    final duplicateBug = labels.firstWhere(
+      (e) => e.toLowerCase().contains('duplicate'),
+      orElse: () => '',
+    );
+
+    final milestone = i['milestone']?['title'] ?? 'na';
+
     // Extract build number
     RegExp regex = RegExp(r'Build version\n\n(.+?)\n\n', multiLine: true);
-    Match? match = regex.firstMatch(i['body']);
+    Match? match = regex.firstMatch(i['body'] ?? '');
     final build = match != null ? match.group(1)! : '';
 
-    final _data = [
-      number,
-      createdBy,
-      createdOn,
-      title,
-      status,
-      assignee,
-      env,
-      build,
-      priority.replaceAll('PRIORITY:', '').trim(),
-      platform.replaceAll('PLATFORM:', '').trim(),
-      mod.replaceAll('MOD: ', '').trim(),
-      ticket.replaceAll('TICKET:', '').trim(),
-      issue,
-      bugStatus,
-      blocker,
-      devPc
-    ];
+    FormattedIssueModel model = FormattedIssueModel(
+      ticketNumber: number.toString(),
+      createdBy: createdBy,
+      createdOn: createdOn,
+      title: title,
+      status: status,
+      assignee: assignee,
+      environment: env,
+      build: build,
+      priority: priority.replaceAll('PRIORITY:', '').trim(),
+      platform: platform.replaceAll('PLATFORM:', '').trim(),
+      module: mod.replaceAll('MOD: ', '').trim(),
+      ticket: ticket.replaceAll('TICKET:', '').trim(),
+      issue: issue,
+      bugStatus: bugStatus,
+      blocker: blocker,
+      devPc: devPc,
+      isInvalidBug: invalidBug.isNotEmpty,
+      isDuplicate: duplicateBug.isNotEmpty,
+      milestone: milestone ?? 'NA',
+    );
 
-    output.add(_data);
+    output.add(model);
   }
 
-  String csv = const ListToCsvConverter().convert(output);
-  return csv;
+  return output;
+}
+
+List<ReportSummary> generateSummary(List<FormattedIssueModel> data) {
+  Map<String, Map<String, List<FormattedIssueModel>>> groupedData = {};
+
+  // Group the data by version and milestone
+  for (var issue in data) {
+    if (!groupedData.containsKey(issue.milestone)) {
+      groupedData[issue.milestone] = {};
+    }
+
+    if (!groupedData[issue.milestone]!.containsKey(issue.build)) {
+      groupedData[issue.milestone]![issue.build] = [];
+    }
+
+    groupedData[issue.milestone]![issue.build]!.add(issue);
+  }
+
+  List<ReportSummary> summary = [];
+
+  groupedData.forEach((milestones, versions) {
+    versions.forEach((version, issues) {
+      int totalBugs = issues.length;
+      int totalResolved =
+          issues.where((element) => element.status == 'closed').length;
+      int totalPending =
+          issues.where((element) => element.status == 'open').length;
+      int invalidBugs =
+          issues.where((element) => element.devPc.isNotEmpty).length;
+      int duplicateBugs =
+          issues.where((element) => element.devPc.isNotEmpty).length;
+
+      summary.add(ReportSummary(
+        sprint: milestones,
+        version: version,
+        bugsCount: totalBugs,
+        resolvedBugsCount: totalResolved,
+        pendingBugsCount: totalPending,
+        invalidBugsCount: invalidBugs,
+        duplicateBugsCount: duplicateBugs,
+      ));
+    });
+  });
+
+  return summary;
 }
